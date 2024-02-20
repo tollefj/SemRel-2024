@@ -1,5 +1,6 @@
 import os
 from math import ceil
+from typing import List
 
 from sentence_transformers import SentenceTransformer, models
 from sentence_transformers.evaluation import (
@@ -7,10 +8,20 @@ from sentence_transformers.evaluation import (
     SimilarityFunction,
 )
 from sentence_transformers.losses import CosineSimilarityLoss
+from sentence_transformers.util import InputExample
 from torch import nn
 from torch.utils.data import DataLoader
 
-from util import get_data, get_examples
+from util import get_data
+
+
+def get_examples(df) -> List[InputExample]:
+    # this assumes a cosine-similarity loss
+    examples = []
+    for _s1, _s2, _score in zip(df.s1, df.s2, df.Score):
+        examples.append(InputExample(texts=[_s1, _s2], label=_score))
+
+    return examples
 
 
 def train_callback(score, epoch, steps):

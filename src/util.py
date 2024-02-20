@@ -1,20 +1,13 @@
-import json
 import os
-import re
 import zipfile
 from argparse import Namespace
 from datetime import datetime
-from typing import List, Tuple
+from typing import List
 
 import numpy as np
-import torch
 from pandas import DataFrame, concat, read_csv
 from scipy import stats
-from sentence_transformers import InputExample, SentenceTransformer
-from sentence_transformers.evaluation import EmbeddingSimilarityEvaluator
 from sklearn.metrics.pairwise import paired_cosine_distances
-from sklearn.model_selection import train_test_split
-from torch import Tensor
 
 from pair_encoder import PairEncoder
 from pair_encoder.util import PairInput
@@ -31,11 +24,6 @@ palette = [
     "#b3d4ff",
     "#00bfa0",
 ]
-
-
-def get_model(model_id: str = "intfloat/multilingual-e5-", size: str = "base"):
-    model = SentenceTransformer(f"{model_id}{size}")
-    return model
 
 
 def get_langs():
@@ -105,40 +93,6 @@ def get_data(
     return get_data_from_path(path, prefix)
 
 
-def get_and_split(
-    lang: str = "eng",
-    seed: int = 42,
-    test_size: float = 0.2,
-    prefix: str = "",
-) -> Tuple[DataFrame, DataFrame]:
-    if lang == "all":
-        print("Getting all languages...")
-        df = get_all_langs(train=True, prefix=prefix)
-    else:
-        df = get_data(lang, prefix=prefix)
-
-    train, test = train_test_split(df, test_size=test_size, random_state=seed)
-    return train, test
-
-
-def get_all_splits(test_size=0.0, prefix=""):
-    dfs = {}
-
-    for lang in get_langs():
-        train, test = None, None
-        if test_size > 0.0:
-            train, test = get_and_split(lang=lang, prefix=prefix)
-        else:
-            train = get_data(lang=lang, train=True, prefix=prefix)
-
-        dfs[lang] = {
-            "train": train,
-            "test": test,
-            "dev": get_data(lang=lang, train=False, prefix=prefix),
-        }
-    return dfs
-
-
 def get_pairs(df) -> List[PairInput]:
     examples = []
     s1 = df.s1.tolist()
@@ -156,25 +110,9 @@ def get_pairs(df) -> List[PairInput]:
     return examples
 
 
-def get_examples(df) -> List[InputExample]:
-    # this assumes a cosine-similarity loss
-    examples = []
-    for _s1, _s2, _score in zip(df.s1, df.s2, df.Score):
-        examples.append(InputExample(texts=[_s1, _s2], label=_score))
-
-    return examples
-
-
-def get_evaluator(test_df: DataFrame) -> EmbeddingSimilarityEvaluator:
-    evaluator = EmbeddingSimilarityEvaluator(
-        test_df.s1.tolist(), test_df.s2.tolist(), test_df.Score.tolist()
-    )
-    return evaluator
-
-
-def embed(model, df, batch_size=16):
-    e1 = model.encode(df.s1.tolist(), batch_size=batch_size, convert_to_numpy=True)
-    e2 = model.encode(df.s2.tolist(), batch_size=batch_size, convert_to_numpy=True)
+def embed(bi_encoder, df, batch_size=16):
+    e1 = bi_encoder.encode(df.s1.tolist(), batch_size=batch_size, convert_to_numpy=True)
+    e2 = bi_encoder.encode(df.s2.tolist(), batch_size=batch_size, convert_to_numpy=True)
     return e1, e2
 
 
@@ -255,7 +193,7 @@ def eval_and_submit(
 
 
 def do_evaluation(
-    model: SentenceTransformer,
+    bi_encoder,
     lang: str,
     df: DataFrame,
     timestamp=None,  # a timestamp defines the folder and unique id
@@ -263,30 +201,19 @@ def do_evaluation(
     info=None,
     model_name=None,
 ) -> np.ndarray:
-    if not model:
-        raise ValueError("model must be specified")
+    if not bi_encoder:
+        raise ValueError("bi_encoder must be specified")
 
     if submit and not timestamp:
         timestamp = get_current_timestamp()
 
-    e1, e2 = embed(model=model, df=df)
+    e1, e2 = embed(bi_encoder=bi_encoder, df=df)
     preds = get_cosine_dist(e1, e2)
 
     if submit:
         make_submission(df, preds, lang, timestamp, info, model_name)
 
     return preds
-
-
-def evaluate_local_model_on_holdout(
-    model_path: str, lang: str, return_preds=False, test_size: float = 0.2
-):
-    model = SentenceTransformer(model_path)
-    _, test = get_and_split(lang=lang, test_size=test_size)
-    preds = do_evaluation(model, lang, test, submit=False)
-    if return_preds:
-        return preds
-    return get_spearman(test["Score"], preds)
 
 
 def get_log_path(
