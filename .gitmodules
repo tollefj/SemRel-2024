@@ -1,0 +1,3 @@
+[submodule "Semantic_Relatedness_SemEval2024"]
+	path = Semantic_Relatedness_SemEval2024
+	url = git@github.com:semantic-textual-relatedness/Semantic_Relatedness_SemEval2024.git
